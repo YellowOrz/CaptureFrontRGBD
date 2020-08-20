@@ -29,13 +29,19 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
     @IBOutlet weak private var multiDepthSwitch: UISwitch!
     
 	@IBOutlet weak private var cameraButton: UIButton!
-
+    
+    /* 拍照按钮 */
 	@IBOutlet weak private var photoButton: UIButton!
+    
+    // 连续保存开关。add by 楚门
+    @IBOutlet weak var KeepSaveSwitch: UISwitch!
+    private var KeepSaveEnable = false
 
 	@IBOutlet weak private var resumeButton: UIButton!
 
 	@IBOutlet weak private var cameraUnavailableLabel: UILabel!
-
+    
+    /* 显示中间、左上角、右上角、左下角、右下角深度值（mm） */
 	@IBOutlet weak private var filterLabel: UILabel!
 
 	@IBOutlet weak private var previewView: PreviewMetalView!
@@ -72,11 +78,13 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 	private let dataOutputQueue = DispatchQueue(label: "video data queue", qos: .userInitiated, attributes: [], autoreleaseFrequency: .workItem)
 
 	private let videoDataOutput = AVCaptureVideoDataOutput()
-
+    
+    // 获取深度数据
 	private let depthDataOutput = AVCaptureDepthDataOutput()
 
 	private var outputSynchronizer: AVCaptureDataOutputSynchronizer?
-
+    
+    // 获取图片数据
 	private let photoOutput = AVCapturePhotoOutput()
 
 	private let filterRenderers: [FilterRenderer] = [RosyMetalRenderer(), RosyCIRenderer()]
@@ -89,12 +97,16 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 
 	private var filterIndex: Int = 0
 
+    // 记录 app运行后采集的帧数。用来每10帧更新一下五个位置的深度值
     private var frameIndex: Int = 0
     
-    private var   multiDepthFrames: Int = 00
+    // 记录 计划连续保存深度图的数量
+    private var multiDepthFrames: Int = 00
     
+    // 记录 已经连续保存深度图的数量
     private var curSavedDepthIndex: Int = 0
     
+    // 记录一张深度图里面的中间、左/右上/下角的深度值
     private var centerDepth: UInt16 = 0
     private var topLeftDepth: UInt16 = 0
     private var topRightDepth: UInt16 = 0
@@ -123,6 +135,7 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
     
     private var timer:Timer!
     
+    // 记录连续拍摄深度图的组数。一组10张。对应app界面的那个“加减号”
     private var interval: Int = 1
     
     private var lastTs: Double = 0
@@ -149,14 +162,26 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         self.view.addSubview(view1)
         
 		// Disable UI. The UI is enabled if and only if the session starts running.
-		cameraButton.isEnabled = false
-		photoButton.isEnabled = false
-		videoFilterSwitch.isEnabled = false
+        // 楚门，开启app之前隐藏所有UI
+        //		cameraButton.isEnabled = false
+//		photoButton.isEnabled = false
+//		videoFilterSwitch.isEnabled = false
+        cameraButton.isHidden = true
+        photoButton.isHidden = true
+        videoFilterSwitch.isHidden = true
+        
 		depthVisualizationSwitch.isHidden = true
 		depthVisualizationLabel.isHidden = true
 		depthSmoothingSwitch.isHidden = true
 		depthSmoothingLabel.isHidden = true
 		mixFactorSlider.isHidden = true
+        // 楚门
+        KeepSaveSwitch.isHidden=true
+        multiDepthSwitch.isHidden=true
+        fpsLabel.isHidden=true
+        TimeCaptureSwitch.isHidden=true
+        IntervalStepper.isHidden=true
+        
         
 		let tapGesture = UITapGestureRecognizer(target: self, action: #selector(focusAndExposeTap))
 		previewView.addGestureRecognizer(tapGesture)
@@ -250,6 +275,15 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 						self.depthSmoothingSwitch.isHidden = !depthEnabled
 						self.depthSmoothingLabel.isHidden = !depthEnabled
 						self.mixFactorSlider.isHidden = !depthEnabled
+                        // 楚门
+                        self.cameraButton.isHidden = !photoDepthDataDeliverySupported
+                        self.photoButton.isHidden = !photoDepthDataDeliverySupported
+                        self.videoFilterSwitch.isHidden = !photoDepthDataDeliverySupported
+                        self.KeepSaveSwitch.isHidden = !depthEnabled
+                        self.multiDepthSwitch.isHidden = !depthEnabled
+                        self.fpsLabel.isHidden = !photoDepthDataDeliverySupported
+                        self.TimeCaptureSwitch.isHidden = !photoDepthDataDeliverySupported
+                        self.IntervalStepper.isHidden = !depthEnabled
 					}
 
 				case .notAuthorized:
@@ -563,17 +597,37 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 			}
 		}
 	}
-
+    
+    /**
+     当“➖➕”被操作后，更新连续拍摄深度图的组数
+     */
     @IBAction func IntervalChanged(_ sender: UIStepper) {
         IntervalLabel.text = String(Int(sender.value))
         //interval = Int(sender.value * 60) // minutes
         interval = Int(sender.value) // seconds
+        
+        // 计算计划连续拍摄深度图的数量
         multiDepthFrames = interval * 10;
         print("interval \(interval)")
     }
     
+    /**
+     开启连续存储模式，禁用“multi save”。
+     当“Keep Save”开关打开后，禁用“Multi Depth”开关以及“Interval Stepper”加减器，同时将KeepSaveEnable设置为false，等待后面按“Photo”按钮再对KeepSaveEnable取反。
+     楚门
+     */
+    @IBAction func keepSaveMode(_ sender: UISwitch) {
+        //“Multi Depth”和“Keep Save”二选一
+        multiDepthSwitch.isEnabled = !sender.isOn
+        IntervalStepper.isEnabled = !sender.isOn
+        KeepSaveEnable = false
+        if sender.isOn {
+            multiDepthSwitch.isOn = false
+        }
+    }
+    
+    
     @IBAction private func toggleTimeCapture(_ sender: UISwitch) {
-        
         //photoButton.isEnabled = !sender.isOn
         multiDepthSwitch.isEnabled = !sender.isOn
         timeCaptureEnabled = sender.isOn
@@ -592,6 +646,16 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
     @IBAction private func changeMultiDepthEnabled(_ sender: UISwitch) {
         self.multiDepthEnabled = sender.isOn
         TimeCaptureSwitch.isEnabled = !sender.isOn
+        // 楚门。“Multi Depth”和“Keep Save”二选一
+        KeepSaveSwitch.isEnabled = !sender.isOn
+        if sender.isOn {
+            KeepSaveSwitch.isOn = false
+        }
+        
+        // 楚门。打开“Multi Depth”的同时初始化连拍数量
+        interval = Int(IntervalStepper.value) // seconds
+        multiDepthFrames = interval * 10;
+        
         //photoButton.isEnabled = !sender.isOn
     }
     
@@ -1000,7 +1064,14 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 		}
 	}
 
+    /**
+    "Photo"按钮对应的操作函数。
+     */
 	@IBAction private func capturePhoto(_ photoButton: UIButton) {
+        // 楚门 连续保存模式下，每按一次"Photo"按钮，将KeepSaveEnable取反
+        if KeepSaveSwitch.isOn{
+            KeepSaveEnable = !KeepSaveEnable
+        }
         
         captureSinglePhoto()
         
@@ -1098,7 +1169,6 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 	}
 
     func saveDepth(depthData: AVDepthData, prefix: String){
-        
         let newDepth = depthData.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32)
         let newDepthPixel = newDepth.depthDataMap
         let width = CVPixelBufferGetWidth(newDepthPixel)
@@ -1137,15 +1207,16 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
             let pixelf = floatBuffer[i]
             if pixelf.isNaN {
                 pixel = 0
+            }else if pixelf > 7.5{ // 楚门 为了防止噪声。因为有时候深度值会很大，比如900
+                pixel = UInt16(7.5*1000)
             }else{
-                pixel = UInt16(lroundf(pixelf * 10000))
+//                楚门，m->mm应该乘1000
+//                pixel = UInt16(lroundf(pixelf * 10000))
+                pixel = UInt16(lroundf(pixelf * 1000))
             }
-            
             data[i] = pixel
         }
             
-        //let fileName = loadLastPhotoFileName()
-        //print(fileName)
         
         let filePath:String = NSHomeDirectory() + "/Documents/" + prefix + ".bin" // Don't save as .raw
         
@@ -1153,7 +1224,7 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         //print(pixelData)
         //print("data count \(data.count)")
         pixelData.write(toFile: filePath, atomically: true)
-        
+
         //            let dataNS:NSArray = data as NSArray
         //            let filePath:String = NSHomeDirectory() + "/Documents/depth.plist"
         //            dataNS.write(toFile: filePath, atomically: true)
@@ -1184,6 +1255,9 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         return ""
     }
     
+    /**
+     计算中间、左上角、右上角、左下角、右下角的取值，然后显示
+     */
     func printDepth(depthData: AVDepthData){
 
         let newDepth = depthData.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32)
@@ -1192,8 +1266,12 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         let height = CVPixelBufferGetHeight(newDepthPixel)
 
         CVPixelBufferLockBaseAddress(newDepthPixel, CVPixelBufferLockFlags(rawValue:0))
-        let floatBuffer = unsafeBitCast(CVPixelBufferGetBaseAddress(newDepthPixel), to: UnsafePointer<Float32>.self)
-
+        
+        // 楚门
+//        let floatBuffer = unsafeBitCast(CVPixelBufferGetBaseAddress(newDepthPixel), to: UnsafePointer<Float32>.self)
+        let floatBuffer = unsafeBitCast(CVPixelBufferGetBaseAddress(newDepthPixel), to: UnsafeMutablePointer<Float32>.self)
+        
+        // 计算
         var index = Int(width * (height/2) + width/2)
         let centerZ = floatBuffer[index]
         
@@ -1229,10 +1307,14 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
             bottomRightDepth = UInt16(lroundf(bottomRightZ * 1000))
         }
         
+        //显示 楚门
+        let dateformatter = DateFormatter()
+        dateformatter.dateFormat = "MM-dd-HH-mm-ss-SSS"
+        let timeStamp=dateformatter.string(from: Date())
+        prefix = String(self.centerDepth) + "_" + String(self.topLeftDepth) + "_" + String(self.topRightDepth) + "_" + String(self.bottomLeftDepth) + "_" + String(self.bottomRightDepth) + "mm" + "_\(timeStamp)_"
         //print("width \(width) height \(height) depth \(centerZ)")
         DispatchQueue.main.async {
-            var number = String(self.centerDepth) + " " + String(self.topLeftDepth) + "/" + String(self.topRightDepth) + " " + String(self.bottomLeftDepth) + "/" + String(self.bottomRightDepth)
-            self.updateFilterLabel(description: number)
+            self.updateFilterLabel(description: self.prefix)
         }
     }
     
@@ -1265,12 +1347,15 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 
 	// MARK: - Video + Depth Output Synchronizer Delegate
 
-	func dataOutputSynchronizer(_ synchronizer: AVCaptureDataOutputSynchronizer, didOutput synchronizedDataCollection: AVCaptureSynchronizedDataCollection) {
-
-		if let syncedDepthData: AVCaptureSynchronizedDepthData = synchronizedDataCollection.synchronizedData(for: depthDataOutput) as? AVCaptureSynchronizedDepthData {
-			if !syncedDepthData.depthDataWasDropped {
-				let depthData = syncedDepthData.depthData
+    func dataOutputSynchronizer(_ synchronizer: AVCaptureDataOutputSynchronizer, didOutput synchronizedDataCollection: AVCaptureSynchronizedDataCollection) {
+//        if let syncedImageData:AVCaptureSynchronizedData = synchronizedDataCollection.synchronizedData(for: photoOutput) as? AVCaptureSynchronizedData{
+//
+//        }
+        if let syncedDepthData: AVCaptureSynchronizedDepthData = synchronizedDataCollection.synchronizedData(for: depthDataOutput) as? AVCaptureSynchronizedDepthData {
+            if !syncedDepthData.depthDataWasDropped {
+                let depthData = syncedDepthData.depthData
                 
+                // 更新FPS
                 let curTs = syncedDepthData.timestamp.seconds
                 let fps = 1/(curTs - self.lastTs)
                 lastTs = curTs;
@@ -1281,34 +1366,31 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
                 
                 frameIndex = frameIndex + 1
                 
-                if frameIndex == 10 {
-                    frameIndex = 0
-                    printDepth(depthData: depthData)
-                    print("intrinsics \(depthData.cameraCalibrationData?.intrinsicMatrix)")
-                                       
-                    print("refdimensions \(depthData.cameraCalibrationData?.intrinsicMatrixReferenceDimensions)")
-                                       
-                    print("pixelsize \(depthData.cameraCalibrationData?.pixelSize)")
-                }
+                
                 
                 if saveDepthToFile {
                     
                     saveDepthToFile = false
                     
-                    var fileName:String = ""
+                    //楚门
+                    printDepth(depthData: depthData)
+                    let fileName:String = prefix
                     var shouldSave:Bool = true
                     
-                    if curSavedDepthIndex == 0
-                    {
-                        let now = NSDate()
-                        let timeInterval:TimeInterval = now.timeIntervalSince1970
-                        let timeStamp = Int(timeInterval)
-                        prefix = String(centerDepth) + "_" + String(topLeftDepth) + "_" + String(topRightDepth) + "_" + String(bottomLeftDepth) + "_" + String(bottomRightDepth) + "mm" + "_\(timeStamp)_"
-                    }
+
+//                    let dateformatter = DateFormatter()
+//                    dateformatter.dateFormat = "MM-dd-HH-mm-ss-SSS"
+//                    let timeStamp=dateformatter.string(from: Date())
+//                    fileName = String(centerDepth) + "_" + String(topLeftDepth) + "_" + String(topRightDepth) + "_" + String(bottomLeftDepth) + "_" + String(bottomRightDepth) + "mm" + "_\(timeStamp)_"
+
                     
                     curSavedDepthIndex += 1
                     
-                    if multiDepthEnabled {
+                    
+                    // 楚门 根据保存模式判断后续是否要继续拍照
+                    if KeepSaveEnable {
+                        saveDepthToFile = true
+                    }else if multiDepthEnabled {
                         if curSavedDepthIndex > multiDepthFrames {
                             shouldSave = false
                             print("complete saving \(multiDepthFrames) depth frames")
@@ -1317,16 +1399,19 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
                         }
                     }
                     
+                    
                     if shouldSave{
                         let index = self.curSavedDepthIndex
                         DispatchQueue.main.async {
                             self.updateMultiDepthLabel(description: "\(index) depth captured")
                         }
                         
-                        fileName = self.prefix + "\(curSavedDepthIndex)"
+
                         print(fileName + " saved")
                         
                         let file = fileName
+
+                        
                         processingQueue.async(execute: {
                             self.saveDepth(depthData: depthData, prefix: file)
                         })
@@ -1354,20 +1439,20 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
                     }
                 }
                 
-				processDepth(depthData: depthData)
+                processDepth(depthData: depthData)
                 
                 //print("active video frame duration \(videoDevice.activeVideoMinFrameDuration.timescale) \(videoDevice.activeVideoMaxFrameDuration.timescale)")
                 
-			}
-		}
+            }
+        }
 
-		if let syncedVideoData: AVCaptureSynchronizedSampleBufferData = synchronizedDataCollection.synchronizedData(for: videoDataOutput) as? AVCaptureSynchronizedSampleBufferData {
-			if !syncedVideoData.sampleBufferWasDropped {
-				let videoSampleBuffer = syncedVideoData.sampleBuffer
-				processVideo(sampleBuffer: videoSampleBuffer)
-			}
-		}
-	}
+        if let syncedVideoData: AVCaptureSynchronizedSampleBufferData = synchronizedDataCollection.synchronizedData(for: videoDataOutput) as? AVCaptureSynchronizedSampleBufferData {
+            if !syncedVideoData.sampleBufferWasDropped {
+                let videoSampleBuffer = syncedVideoData.sampleBuffer
+                processVideo(sampleBuffer: videoSampleBuffer)
+            }
+        }
+    }
 
 	// MARK: - Photo Output Delegate
 

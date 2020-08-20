@@ -8,3 +8,5 @@
 # Xcode - User files
 xcuserdata/
 *.xcworkspace
+build
+.idea
