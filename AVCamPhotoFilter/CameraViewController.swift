@@ -29,9 +29,8 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
     @IBOutlet weak private var multiDepthSwitch: UISwitch!
     
 	@IBOutlet weak private var cameraButton: UIButton!
-    
-    /* 拍照按钮 */
-	@IBOutlet weak private var photoButton: UIButton!
+ 
+	@IBOutlet weak private var photoButton: UIButton! //     拍照按钮
     
     // 连续保存开关。add by 楚门
     @IBOutlet weak var KeepSaveSwitch: UISwitch!
@@ -41,8 +40,7 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 
 	@IBOutlet weak private var cameraUnavailableLabel: UILabel!
     
-    /* 显示中间、左上角、右上角、左下角、右下角深度值（mm） */
-	@IBOutlet weak private var filterLabel: UILabel!
+	@IBOutlet weak private var filterLabel: UILabel! //     显示中间、左上角、右上角、左下角、右下角深度值（mm）
 
 	@IBOutlet weak private var previewView: PreviewMetalView!
 
@@ -79,13 +77,11 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 
 	private let videoDataOutput = AVCaptureVideoDataOutput()
     
-    // 获取深度数据
-	private let depthDataOutput = AVCaptureDepthDataOutput()
+	private let depthDataOutput = AVCaptureDepthDataOutput() // 获取深度数据
 
 	private var outputSynchronizer: AVCaptureDataOutputSynchronizer?
     
-    // 获取图片数据
-	private let photoOutput = AVCapturePhotoOutput()
+	private let photoOutput = AVCapturePhotoOutput() // 获取图片数据
 
 	private let filterRenderers: [FilterRenderer] = [RosyMetalRenderer(), RosyCIRenderer()]
 
@@ -97,14 +93,11 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 
 	private var filterIndex: Int = 0
 
-    // 记录 app运行后采集的帧数。用来每10帧更新一下五个位置的深度值
-    private var frameIndex: Int = 0
+    private var frameIndex: Int = 0 // 记录 app运行后采集的帧数。用来每10帧更新一下五个位置的深度值
     
-    // 记录 计划连续保存深度图的数量
-    private var multiDepthFrames: Int = 00
+    private var multiDepthFrames: Int = 00 // 记录 计划连续保存深度图的数量
     
-    // 记录 已经连续保存深度图的数量
-    private var curSavedDepthIndex: Int = 0
+    private var curSavedDepthIndex: Int = 0 // 记录 已经连续保存深度图的数量
     
     // 记录一张深度图里面的中间、左/右上/下角的深度值
     private var centerDepth: UInt16 = 0
@@ -135,12 +128,18 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
     
     private var timer:Timer!
     
-    // 记录连续拍摄深度图的组数。一组10张。对应app界面的那个“加减号”
-    private var interval: Int = 1
+    private var interval: Int = 1 // 记录连续拍摄深度图的组数。一组10张。对应app界面的那个“加减号”
     
     private var lastTs: Double = 0
     
     private var prefix: String = ""
+    
+    // 楚门 一次拍摄（包括连拍）根据时间存放在不同目录下面
+    private var saveDir: String = "MM-dd-HH-mm-ss-SSS"
+    private var fileDir:String = NSHomeDirectory() + "/Documents/"
+    
+    // 楚门 保存深度文件的名称。因为保存RGB的代码是保存完全部深度文件后，再依次保存它们的RGB
+    var depthName = [String]()
     
 	private let processingQueue = DispatchQueue(label: "photo processing queue", attributes: [], autoreleaseFrequency: .workItem)
 
@@ -1167,36 +1166,53 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 		processDepth(depthData: depthData)
         
 	}
-
-    func saveDepth(depthData: AVDepthData, prefix: String){
+    /**
+     楚门 单独写了一个保存RGB的函数。photoOutput()里面使用jpegData.wirte()好像有bug
+     */
+    func saveRGB(rgbData:AVCapturePhoto){
+        // 转换数据格式
+        guard let photoPixelBuffer = rgbData.pixelBuffer else {
+            print("Error occurred while capturing photo: Missing pixel buffer ")
+            return
+        }
+        let metadataAttachments: CFDictionary = rgbData.metadata as CFDictionary
+        guard let jpegData = CameraViewController.jpegData(withPixelBuffer: photoPixelBuffer, attachments: metadataAttachments) else {
+            print("Unable to create JPEG photo")
+            return
+        }
+        
+        // 与深度值保存在同一文件夹下面
+        let filePath = URL(fileURLWithPath: self.fileDir + self.prefix + ".png")
+        do {
+            try jpegData.write(to: filePath)
+        }catch{
+            print("Error: save RGB image false!!!")
+        }
+        
+    }
+    
+    func saveDepth(depthData: AVDepthData){
         let newDepth = depthData.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32)
         let newDepthPixel = newDepth.depthDataMap
         let width = CVPixelBufferGetWidth(newDepthPixel)
         let height = CVPixelBufferGetHeight(newDepthPixel)
         
+        CVPixelBufferLockBaseAddress(newDepthPixel, CVPixelBufferLockFlags(rawValue:0))
+        
         // Save jpeg image
         //let metadataAttachments: CFDictionary = photo.metadata as CFDictionary
+        // 楚门 保存下来的深度图有两个影子，解决不掉。此外，目前连拍的时候，拍到后面帧率会变低（只有几个fps），¬再加上这个功能帧率会更低
         guard let jpegData = CameraViewController.jpegData(withPixelBuffer: newDepthPixel, attachments: nil) else {
             print("Unable to create JPEG photo")
             return
         }
-        
-        // Save JPEG to photo library
-        //PHPhotoLibrary.requestAuthorization { status in
-        //    if status == .authorized {
-        //        PHPhotoLibrary.shared().performChanges({
-        //            let creationRequest = PHAssetCreationRequest.forAsset()
-        //            creationRequest.addResource(with: .photo, data: jpegData, options: nil)
-        //        }, completionHandler: { _, error in
-        //            if let error = error {
-        //                print("Error occurred while saving photo to photo library: \(error)")
-        //            }
-        //        })
-        //    }
-        //}
-            
-        // Save raw image
-        CVPixelBufferLockBaseAddress(newDepthPixel, CVPixelBufferLockFlags(rawValue:0))
+        let path = URL(fileURLWithPath: fileDir + self.prefix + "_depth.png")
+        do {
+            try jpegData.write(to: path)
+        }catch{
+            print("Error: save RGB image false!!!")
+        }
+
         
         let floatBuffer = unsafeBitCast(CVPixelBufferGetBaseAddress(newDepthPixel), to: UnsafePointer<Float32>.self)
         
@@ -1209,20 +1225,18 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
                 pixel = 0
             }else if pixelf > 7.5{ // 楚门 为了防止噪声。因为有时候深度值会很大，比如900
                 pixel = UInt16(7.5*1000)
-            }else{
-//                楚门，m->mm应该乘1000
+            }else{//                楚门，m->mm应该乘1000
 //                pixel = UInt16(lroundf(pixelf * 10000))
                 pixel = UInt16(lroundf(pixelf * 1000))
             }
             data[i] = pixel
         }
             
-        
-        let filePath:String = NSHomeDirectory() + "/Documents/" + prefix + ".bin" // Don't save as .raw
+        //楚门 将同一次拍摄（包括连拍）的图片放在同一文件夹下
+        let filePath:String = fileDir + self.prefix + ".bin" // Don't save as .raw
+        print(filePath)
         
         let pixelData = NSData(bytes: data, length: data.count * 2)
-        //print(pixelData)
-        //print("data count \(data.count)")
         pixelData.write(toFile: filePath, atomically: true)
 
         //            let dataNS:NSArray = data as NSArray
@@ -1311,7 +1325,8 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         let dateformatter = DateFormatter()
         dateformatter.dateFormat = "MM-dd-HH-mm-ss-SSS"
         let timeStamp=dateformatter.string(from: Date())
-        prefix = String(self.centerDepth) + "_" + String(self.topLeftDepth) + "_" + String(self.topRightDepth) + "_" + String(self.bottomLeftDepth) + "_" + String(self.bottomRightDepth) + "mm" + "_\(timeStamp)_"
+        prefix = "\(timeStamp)_" + String(self.centerDepth) + "_" + String(self.topLeftDepth) + "_" + String(self.topRightDepth) + "_" + String(self.bottomLeftDepth) + "_" + String(self.bottomRightDepth) + "mm"
+        print("prefix is \(prefix)")
         //print("width \(width) height \(height) depth \(centerZ)")
         DispatchQueue.main.async {
             self.updateFilterLabel(description: self.prefix)
@@ -1319,13 +1334,9 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
     }
     
 	func processDepth(depthData: AVDepthData) {
-		if !renderingEnabled {
-			return
-		}
+		if !renderingEnabled { return }
 
-		if !depthVisualizationEnabled {
-			return
-		}
+		if !depthVisualizationEnabled { return }
 
 		if !videoDepthConverter.isPrepared {
 			/*
@@ -1348,9 +1359,6 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 	// MARK: - Video + Depth Output Synchronizer Delegate
 
     func dataOutputSynchronizer(_ synchronizer: AVCaptureDataOutputSynchronizer, didOutput synchronizedDataCollection: AVCaptureSynchronizedDataCollection) {
-//        if let syncedImageData:AVCaptureSynchronizedData = synchronizedDataCollection.synchronizedData(for: photoOutput) as? AVCaptureSynchronizedData{
-//
-//        }
         if let syncedDepthData: AVCaptureSynchronizedDepthData = synchronizedDataCollection.synchronizedData(for: depthDataOutput) as? AVCaptureSynchronizedDepthData {
             if !syncedDepthData.depthDataWasDropped {
                 let depthData = syncedDepthData.depthData
@@ -1362,87 +1370,69 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
                 DispatchQueue.main.async {
                     self.fpsLabel.text = "FPS " + String(format:"%.2f", fps)
                 }
-                //print("sync FPS \(1/(curTs - lastTs))")
                 
-                frameIndex = frameIndex + 1
-                
+//                frameIndex = frameIndex + 1 // 楚门 暂时用不到了
                 
                 
+
                 if saveDepthToFile {
-                    
-                    saveDepthToFile = false
-                    
-                    //楚门
-                    printDepth(depthData: depthData)
-                    let fileName:String = prefix
-                    var shouldSave:Bool = true
-                    
-
-//                    let dateformatter = DateFormatter()
-//                    dateformatter.dateFormat = "MM-dd-HH-mm-ss-SSS"
-//                    let timeStamp=dateformatter.string(from: Date())
-//                    fileName = String(centerDepth) + "_" + String(topLeftDepth) + "_" + String(topRightDepth) + "_" + String(bottomLeftDepth) + "_" + String(bottomRightDepth) + "mm" + "_\(timeStamp)_"
-
-                    
-                    curSavedDepthIndex += 1
-                    
-                    
                     // 楚门 根据保存模式判断后续是否要继续拍照
-                    if KeepSaveEnable {
+                    if KeepSaveEnable || (multiDepthEnabled && (curSavedDepthIndex < multiDepthFrames)){
                         saveDepthToFile = true
-                    }else if multiDepthEnabled {
-                        if curSavedDepthIndex > multiDepthFrames {
-                            shouldSave = false
-                            print("complete saving \(multiDepthFrames) depth frames")
-                        }else{
-                            saveDepthToFile = true // keep saving
-                        }
-                    }
-                    
-                    
-                    if shouldSave{
-                        let index = self.curSavedDepthIndex
-                        DispatchQueue.main.async {
-                            self.updateMultiDepthLabel(description: "\(index) depth captured")
-                        }
-                        
-
-                        print(fileName + " saved")
-                        
-                        let file = fileName
-
-                        
-                        processingQueue.async(execute: {
-                            self.saveDepth(depthData: depthData, prefix: file)
-                        })
-                        sessionQueue.async {
-                            
-                            // Capture uncompressed image data in 32-bit BGRA format.
-                            let photoSettings = AVCapturePhotoSettings(format: [kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)])
-                            
-                          
-                                photoSettings.isDepthDataDeliveryEnabled = true
-                                photoSettings.embedsDepthDataInPhoto = true
-                                photoSettings.isDepthDataFiltered = false
-                            
-                                photoSettings.isHighResolutionPhotoEnabled = false // false by default
-                                photoSettings.flashMode = .off // off by default
-                                photoSettings.isAutoStillImageStabilizationEnabled = false
-                        
-                            
-                            self.photoOutput.capturePhoto(with: photoSettings, delegate: self)
-                        }
-                    }
-                    
-                    if saveDepthToFile == false{
+                    }else{
+                        saveDepthToFile = false
                         curSavedDepthIndex = 0
+                        return
                     }
+                    
+                    // 楚门
+                    printDepth(depthData: depthData)
+                    //var shouldSave:Bool = true
+                    curSavedDepthIndex += 1 // 更新连拍数量
+                    
+                    // 楚门 拍摄一个场景的第一张图的时候，更新saveDir，以便将这次拍摄的所有图片放在同一文件夹下面
+                    if curSavedDepthIndex == 1{
+                        let dateformatter = DateFormatter()
+                        dateformatter.dateFormat = "MM-dd-HH-mm-ss-SSS"
+                        self.saveDir=dateformatter.string(from: Date())
+                        self.fileDir = NSHomeDirectory() + "/Documents/" + self.saveDir + "/"
+                        // 创建文件夹 https://blog.csdn.net/a136447572/article/details/78983374
+                        let  fileManager = FileManager.default
+                        do{  // 创建文件夹   1，路径 2 是否补全中间的路劲 3 属性
+                            try fileManager.createDirectory(atPath: self.fileDir, withIntermediateDirectories: true, attributes: nil)
+                        } catch{
+                            print("Error: creat diraction false!!!")
+                        }
+                    }
+                    
+//                    if shouldSave{
+                    let index = self.curSavedDepthIndex
+                    DispatchQueue.main.async {
+                        self.updateMultiDepthLabel(description: "\(index) depth captured")
+                    }
+                    self.saveDepth(depthData: depthData)
+                    // 下面这个好像是多线程或者什么的，反正会出现保存深度文件时文件夹还没有创建好的情况，导致前5-6张保存失败
+//                    processingQueue.async(execute: {
+//                        self.saveDepth(depthData: depthData)
+//                        //                            self.saveRGB(rgbData: <#T##AVCapturePhoto#>)
+//                    })
+                    sessionQueue.async {
+                        // Capture uncompressed image data in 32-bit BGRA format.
+                        let photoSettings = AVCapturePhotoSettings(format: [kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)])
+                            photoSettings.isDepthDataDeliveryEnabled = true
+                            photoSettings.embedsDepthDataInPhoto = true
+                            photoSettings.isDepthDataFiltered = false
+                            photoSettings.isHighResolutionPhotoEnabled = false // false by default
+                            photoSettings.flashMode = .off // off by default
+                            photoSettings.isAutoStillImageStabilizationEnabled = false
+                        self.photoOutput.capturePhoto(with: photoSettings, delegate: self)
+                    }
+//                    }
+//                    if saveDepthToFile == false{
+//                        curSavedDepthIndex = 0
+//                    }
                 }
-                
                 processDepth(depthData: depthData)
-                
-                //print("active video frame duration \(videoDevice.activeVideoMinFrameDuration.timescale) \(videoDevice.activeVideoMaxFrameDuration.timescale)")
-                
             }
         }
 
@@ -1455,7 +1445,7 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
     }
 
 	// MARK: - Photo Output Delegate
-
+    // 这个保存RGB的函数，是在深度图全部保存完了以后，再依次保存它们对应的RGB图
 	func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
 		guard let photoPixelBuffer = photo.pixelBuffer else {
 			print("Error occurred while capturing photo: Missing pixel buffer (\(String(describing: error)))")
@@ -1474,7 +1464,15 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
                 return
             }
             
-            // Save JPEG to photo library
+            // 楚门 与深度值保存在同一文件夹下面
+//            let filePath = URL(fileURLWithPath: self.fileDir + self.prefix + ".png")
+//            do {
+//                try jpegData.write(to: filePath)
+//            }catch{
+//                print("Error: save RGB image false!!!")
+//            }
+            
+            //保存到系统相册
             PHPhotoLibrary.requestAuthorization { status in
                 if status == .authorized {
                     PHPhotoLibrary.shared().performChanges({
@@ -1489,7 +1487,6 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
             }
             
             //var finalPixelBuffer = photoPixelBuffer
-            
 //            if let filter = self.photoFilter {
 //                if !filter.isPrepared {
 //                    filter.prepare(with: photoFormatDescription!, outputRetainedBufferCountHint: 2)
@@ -1502,85 +1499,86 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 //                finalPixelBuffer = filteredPixelBuffer
 //            }
 
+            // 楚门 暂时用不到
             // Save depth data
-			if let depthData = photo.depthData {
-				let depthPixelBuffer = depthData.depthDataMap
-
-//                //let metadataAttachments: CFDictionary = photo.metadata as CFDictionary
-//                guard let jpegData = CameraViewController.jpegData(withPixelBuffer: depthPixelBuffer, attachments: nil) else {
-//                    print("Unable to create JPEG photo")
-//                    return
-//                }
+//			if let depthData = photo.depthData {
+//				let depthPixelBuffer = depthData.depthDataMap
 //
-//                // Save JPEG to photo library
-//                PHPhotoLibrary.requestAuthorization { status in
-//                    if status == .authorized {
-//                        PHPhotoLibrary.shared().performChanges({
-//                            let creationRequest = PHAssetCreationRequest.forAsset()
-//                            creationRequest.addResource(with: .photo, data: jpegData, options: nil)
-//                        }, completionHandler: { _, error in
-//                            if let error = error {
-//                                print("Error occurred while saving photo to photo library: \(error)")
-//                            }
-//                        })
-//                    }
-//                }
-                
-                // Save depth pixel buffer
-//                let ciImage = CIImage(cvPixelBuffer: depthPixelBuffer)
-//                //let ciImage = CIImage(cvPixelBuffer: cvPixelBuffer).applyingOrientation(imageOrientation)
-//                //let filteredCIImage = ciImage.applyingFilter("CIPhotoEffectNoir", withInputParameters: nil)
+////                //let metadataAttachments: CFDictionary = photo.metadata as CFDictionary
+////                guard let jpegData = CameraViewController.jpegData(withPixelBuffer: depthPixelBuffer, attachments: nil) else {
+////                    print("Unable to create JPEG photo")
+////                    return
+////                }
+////
+////                // Save JPEG to photo library
+////                PHPhotoLibrary.requestAuthorization { status in
+////                    if status == .authorized {
+////                        PHPhotoLibrary.shared().performChanges({
+////                            let creationRequest = PHAssetCreationRequest.forAsset()
+////                            creationRequest.addResource(with: .photo, data: jpegData, options: nil)
+////                        }, completionHandler: { _, error in
+////                            if let error = error {
+////                                print("Error occurred while saving photo to photo library: \(error)")
+////                            }
+////                        })
+////                    }
+////                }
 //
-//                // Get a JPEG data representation of the filter output.
-//                let colorSpaceMap: [AVCaptureColorSpace: CFString] = [
-//                    .sRGB   : CGColorSpace.sRGB,
-//                    .P3_D65 : CGColorSpace.displayP3,
-//                    ]
-//                let colorSpace = CGColorSpace(name: colorSpaceMap[self.videoCaptureDevice.activeColorSpace]!)!
-//                guard let jpegData2 = CIContext().jpegRepresentation(of: ciImage, colorSpace: colorSpace) else {
-//                    print("Unable to create filtered JPEG.")
-//                    //completionHandler?(false, nil)
-//                    return
-//                }
+//                // Save depth pixel buffer
+////                let ciImage = CIImage(cvPixelBuffer: depthPixelBuffer)
+////                //let ciImage = CIImage(cvPixelBuffer: cvPixelBuffer).applyingOrientation(imageOrientation)
+////                //let filteredCIImage = ciImage.applyingFilter("CIPhotoEffectNoir", withInputParameters: nil)
+////
+////                // Get a JPEG data representation of the filter output.
+////                let colorSpaceMap: [AVCaptureColorSpace: CFString] = [
+////                    .sRGB   : CGColorSpace.sRGB,
+////                    .P3_D65 : CGColorSpace.displayP3,
+////                    ]
+////                let colorSpace = CGColorSpace(name: colorSpaceMap[self.videoCaptureDevice.activeColorSpace]!)!
+////                guard let jpegData2 = CIContext().jpegRepresentation(of: ciImage, colorSpace: colorSpace) else {
+////                    print("Unable to create filtered JPEG.")
+////                    //completionHandler?(false, nil)
+////                    return
+////                }
+////
+////                // Write it to the Photos library.
+////                PHPhotoLibrary.shared().performChanges( {
+////                    let creationRequest = PHAssetCreationRequest.forAsset()
+////                    creationRequest.addResource(with: PHAssetResourceType.photo, data: jpegData2, options: nil)
+////                }, completionHandler: { success, error in
+////                    DispatchQueue.main.async {
+////                        //completionHandler?(success, error)
+////                    }
+////                })
 //
-//                // Write it to the Photos library.
-//                PHPhotoLibrary.shared().performChanges( {
-//                    let creationRequest = PHAssetCreationRequest.forAsset()
-//                    creationRequest.addResource(with: PHAssetResourceType.photo, data: jpegData2, options: nil)
-//                }, completionHandler: { success, error in
-//                    DispatchQueue.main.async {
-//                        //completionHandler?(success, error)
-//                    }
-//                })
-                
-//                if !self.photoDepthConverter.isPrepared {
-//                    var depthFormatDescription: CMFormatDescription?
-//                    CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, depthPixelBuffer, &depthFormatDescription)
+////                if !self.photoDepthConverter.isPrepared {
+////                    var depthFormatDescription: CMFormatDescription?
+////                    CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, depthPixelBuffer, &depthFormatDescription)
+////
+////                    /*
+////                    outputRetainedBufferCountHint is the number of pixel buffers we expect to hold on to from the renderer. This value informs the renderer
+////                    how to size its buffer pool and how many pixel buffers to preallocate. Allow 3 frames of latency to cover the dispatch_async call.
+////                    */
+////                    self.photoDepthConverter.prepare(with: depthFormatDescription!, outputRetainedBufferCountHint: 3)
+////                }
+////
+////                guard let convertedDepthPixelBuffer = self.photoDepthConverter.render(pixelBuffer: depthPixelBuffer) else {
+////                    print("Unable to convert depth pixel buffer")
+////                    return
+////                }
+////
+////                if !self.photoDepthMixer.isPrepared {
+////                    self.photoDepthMixer.prepare(with: photoFormatDescription!, outputRetainedBufferCountHint: 2)
+////                }
 //
-//                    /*
-//                    outputRetainedBufferCountHint is the number of pixel buffers we expect to hold on to from the renderer. This value informs the renderer
-//                    how to size its buffer pool and how many pixel buffers to preallocate. Allow 3 frames of latency to cover the dispatch_async call.
-//                    */
-//                    self.photoDepthConverter.prepare(with: depthFormatDescription!, outputRetainedBufferCountHint: 3)
-//                }
-//
-//                guard let convertedDepthPixelBuffer = self.photoDepthConverter.render(pixelBuffer: depthPixelBuffer) else {
-//                    print("Unable to convert depth pixel buffer")
-//                    return
-//                }
-//
-//                if !self.photoDepthMixer.isPrepared {
-//                    self.photoDepthMixer.prepare(with: photoFormatDescription!, outputRetainedBufferCountHint: 2)
-//                }
-
-				// Combine image and depth map
-//                guard let mixedPixelBuffer = self.photoDepthMixer.mix(videoPixelBuffer: finalPixelBuffer, depthPixelBuffer: convertedDepthPixelBuffer) else {
-//                    print("Unable to mix depth and photo buffers")
-//                    return
-//                }
-//
-//                finalPixelBuffer = mixedPixelBuffer
-			}
+//				// Combine image and depth map
+////                guard let mixedPixelBuffer = self.photoDepthMixer.mix(videoPixelBuffer: finalPixelBuffer, depthPixelBuffer: convertedDepthPixelBuffer) else {
+////                    print("Unable to mix depth and photo buffers")
+////                    return
+////                }
+////
+////                finalPixelBuffer = mixedPixelBuffer
+//			}
 		}
 	}
 

@@ -3,10 +3,13 @@
 //
 #include<iostream>
 #include <vector>
+#include <opencv2/opencv.hpp>
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
+#include <opencv2/core/utils/filesystem.hpp>
 #include <stdio.h>
-#include<string>
+#include <string>
+#include <dirent.h>
 
 #define WIDTH 640
 #define HEIGHT 480
@@ -14,11 +17,45 @@
 #define RED     "\033[31m"      /* Red */
 #define YELLOW  "\033[33m"      /* Yellow */
 using namespace std;
+/*递归读取binfile文件夹下面所有的.bin文件
+并且创建好可视化后png保存的目录*/
+bool GetBinfilesPath(string father_dir, vector<string> &binfiles ){
+    DIR *dir=opendir(father_dir.c_str());
+    if(dir==NULL){
+        cout << father_dir << " don't exit!" << endl;
+        return false;
+    }
+    struct dirent *entry;
+    while((entry = readdir(dir)) != NULL){
+        string name(entry->d_name);
+        // 类型为目录                    排除“.”和“..”以及隐藏文件夹
+        if(entry->d_type == DT_DIR ) {
+            if (name.find(".") == string::npos) {
+                string son_dir = father_dir + name + "/";
+
+                //创建png的目录
+                string png_son_dir = son_dir;
+                string mkdir = "mkdir -p " + png_son_dir.replace(png_son_dir.find("bin"), 3, "png");
+                cout << mkdir << endl;
+                system(mkdir.c_str());
+
+                vector<string> tempPath;
+                GetBinfilesPath(son_dir, tempPath);
+                binfiles.insert(binfiles.end(), tempPath.begin(), tempPath.end());
+            }
+        }
+        // 类型为目录。只找bin文件
+        else if(name.find("bin") != string::npos)
+            binfiles.push_back(father_dir+name);
+    }
+    closedir(dir);
+    return true;
+}
 
 int main() {
     string binfile_dir = "../binfile/";
-    vector<cv::String> binfiles;
-    cv::glob(binfile_dir, binfiles);
+    vector<string> binfiles;
+    GetBinfilesPath(binfile_dir,binfiles);
     FILE *fp;
 
     for (int i = 0; i < binfiles.size(); i++) {
