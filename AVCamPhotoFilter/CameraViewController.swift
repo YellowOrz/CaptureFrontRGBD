@@ -56,6 +56,12 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 
     @IBOutlet weak private var mixFactorSlider: UISlider!
 
+    // 楚门。选择深度图输出格式
+    @IBOutlet weak private var depth2bin: UISwitch!
+    @IBOutlet weak private var depth2png: UISwitch!
+    private var depth2binEnable = true
+    private var depth2pngEnable = true
+    
 	private enum SessionSetupResult {
 		case success
 		case notAuthorized
@@ -592,6 +598,19 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 			}
 		}
 	}
+    /**
+     楚门 是否要将depth保存为bin格式
+     */
+    @IBAction func depth2binChanged(_ sender: UISwitch) {
+        depth2binEnable = depth2bin.isOn
+    }
+    
+    /**
+     楚门 是否要将depth保存为png格式
+     */
+    @IBAction func depth2pngChanged(_ sender: UISwitch) {
+        depth2pngEnable = depth2png.isOn
+    }
     
     /**
      当“➖➕”被操作后，更新连续拍摄深度图的组数
@@ -1186,43 +1205,48 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         
         CVPixelBufferLockBaseAddress(newDepthPixel, CVPixelBufferLockFlags(rawValue:0))
         
-        /*楚门。以下将深度图保存为jpeg格式*/
-        // 目前连拍的时候，拍到后面帧率会变低（只有几个fps），再加上这个功能帧率可能会更低
+//        楚门。以下将深度图保存为png格式
         //let metadataAttachments: CFDictionary = photo.metadata as CFDictionary
-        guard let jpegData = CameraViewController.jpegData(withPixelBuffer: newDepthPixel, attachments: nil) else {
-            print("Unable to create JPEG photo")
-            return
-        }
-        let path = URL(fileURLWithPath: fileDir + self.prefix + "_depth.png")
-        do {
-            try jpegData.write(to: path)
-        }catch{
-            print("Error: save RGB image false!!!")
-        }
-        /*以上将深度图保存为jpeg格式*/
-        
-        /*楚门。以下将深度图保存为bin格式*/
-        // 将深度数据写入一个数组，然后一次性保存
-        let floatBuffer = unsafeBitCast(CVPixelBufferGetBaseAddress(newDepthPixel), to: UnsafePointer<Float32>.self)
-        var data = [UInt16](repeating: 0, count: width * height)
-        var pixel:UInt16!
-        for i in 0..<(width*height) {
-            let pixelf = floatBuffer[i]
-            if pixelf.isNaN {
-                pixel = 0
-            }else if pixelf > 7.5{ // 楚门 为了防止噪声。因为有时候深度值会很大，比如900
-                pixel = UInt16(7.5*1000)
-            }else{//                楚门，m->mm应该乘1000
-                pixel = UInt16(lroundf(pixelf * 1000))
+        if depth2pngEnable{
+            print("jpeg")
+            guard let jpegData = CameraViewController.jpegData(withPixelBuffer: newDepthPixel, attachments: nil) else {
+                print("Unable to create JPEG photo")
+                return
             }
-            data[i] = pixel
+            let path = URL(fileURLWithPath: fileDir + self.prefix + "_depth.png")
+            do {
+                try jpegData.write(to: path)
+            }catch{
+                print("Error: save RGB image false!!!")
+            }
         }
-        //将同一次拍摄（包括连拍）的图片放在同一文件夹下
-        let filePath:String = fileDir + self.prefix + ".bin" // Don't save as .raw
-        print(filePath)
-        let pixelData = NSData(bytes: data, length: data.count * 2)
-        pixelData.write(toFile: filePath, atomically: true)
-        /*以上将深度图保存为bin格式*/
+        
+//        楚门。以下将深度图保存为bin格式，比保存图片（depth&rgb）慢多了
+        // 将深度数据写入一个数组，然后一次性保存
+        if depth2binEnable{
+            print("bin")
+            let floatBuffer = unsafeBitCast(CVPixelBufferGetBaseAddress(newDepthPixel), to: UnsafePointer<Float32>.self)
+            var data = [UInt16](repeating: 0, count: width * height)
+            var pixel:UInt16!
+            for i in 0..<(width*height) {
+                let pixelf = floatBuffer[i]
+                if pixelf.isNaN {
+                    pixel = 0
+                }else if pixelf > 7.5{ // 楚门 为了防止噪声。因为有时候深度值会很大，比如900
+                    pixel = UInt16(7.5*1000)
+                }else{//                楚门，m->mm应该乘1000
+                    pixel = UInt16(lroundf(pixelf * 1000))
+                }
+                data[i] = pixel
+            }
+            //将同一次拍摄（包括连拍）的图片放在同一文件夹下
+            let filePath:String = fileDir + self.prefix + ".bin" // Don't save as .raw
+//            print(filePath)
+            let pixelData = NSData(bytes: data, length: data.count * 2)
+            pixelData.write(toFile: filePath, atomically: true)
+        }
+
+        
         CVPixelBufferUnlockBaseAddress(newDepthPixel, CVPixelBufferLockFlags(rawValue:0))
     }
     
