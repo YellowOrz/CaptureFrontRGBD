@@ -11,6 +11,7 @@
   - **Keep Save模式**：即连续拍照。在app打开的初始状态下（“Depth”开关打开），打开”Keep Save“开关，按下底部的“photo”按钮开始连续拍照，直到第二次按下“photo”按钮时拍照才会停止
   - **depth格式选择**：默认将一张depth同时保存bin和jpeg两种格式，可以通过`Depth->bin`和`Depth->png`两个开关来选择要保存的格式。
   - **深度图可视化**：将app保存的.bin文件(可以包含文件夹or其他文件，可视化工具会筛选出.bin文件的)从ipad/iphone导出后，存放在`./VisualizationTool/binfile`下面(里面已经放了一些文件/文件夹，当作示例)，然后运行camke工程，.bin文件会被读取然后根据最大、最小值归一化到0-255后保存为.png，存在`./VisualizationTool/pngfile`下面
+  - **相机内参**：每次拍摄，都会在采集第一张图片的时候在xcode的输出界面现实相机内参。考虑到相机内参不变，我已经将其复制到`camera_intrinsic.txt`里面了
 
 - 注意：
   - 单拍模式下，也会按照时间命名的文件夹存放

@@ -1388,7 +1388,7 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
             printDepth(depthData: depthData)
             curSavedDepthIndex += 1 // 更新连拍数量
             
-            // 楚门 拍摄一个场景的第一张图的时候，更新saveDir，以便将这次拍摄的所有图片放在同一文件夹下面
+            // 楚门 拍摄一个场景的第一张图的时候，更新saveDir，以便将这次拍摄的所有图片放在同一文件夹下面，同时输出相机内参
             if curSavedDepthIndex == 1{
                 let dateformatter = DateFormatter()
                 dateformatter.dateFormat = "MM-dd-HH-mm-ss-SSS"
@@ -1401,6 +1401,7 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
                 } catch{
                     print("Error: creat diraction false!!!")
                 }
+                print("intrinsics \(depthData.cameraCalibrationData?.intrinsicMatrix)")
             }
             
             let index = self.curSavedDepthIndex
