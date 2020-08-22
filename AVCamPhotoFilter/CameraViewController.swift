@@ -1208,7 +1208,6 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 //        楚门。以下将深度图保存为png格式
         //let metadataAttachments: CFDictionary = photo.metadata as CFDictionary
         if depth2pngEnable{
-            print("jpeg")
             guard let jpegData = CameraViewController.jpegData(withPixelBuffer: newDepthPixel, attachments: nil) else {
                 print("Unable to create JPEG photo")
                 return
@@ -1224,7 +1223,6 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
 //        楚门。以下将深度图保存为bin格式，比保存图片（depth&rgb）慢多了
         // 将深度数据写入一个数组，然后一次性保存
         if depth2binEnable{
-            print("bin")
             let floatBuffer = unsafeBitCast(CVPixelBufferGetBaseAddress(newDepthPixel), to: UnsafePointer<Float32>.self)
             var data = [UInt16](repeating: 0, count: width * height)
             var pixel:UInt16!
@@ -1329,8 +1327,7 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         dateformatter.dateFormat = "MM-dd-HH-mm-ss-SSS"
         let timeStamp=dateformatter.string(from: Date())
         prefix = "\(timeStamp)_" + String(self.centerDepth) + "_" + String(self.topLeftDepth) + "_" + String(self.topRightDepth) + "_" + String(self.bottomLeftDepth) + "_" + String(self.bottomRightDepth) + "mm"
-        print("prefix is \(prefix)")
-        //print("width \(width) height \(height) depth \(centerZ)")
+//        print("prefix is \(prefix)")
         DispatchQueue.main.async {
             self.updateFilterLabel(description: self.prefix)
         }
@@ -1401,7 +1398,19 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
                 } catch{
                     print("Error: creat diraction false!!!")
                 }
-                print("intrinsics \(depthData.cameraCalibrationData?.intrinsicMatrix)")
+                //print("intrinsics \(depthData.cameraCalibrationData?.intrinsicMatrix)")
+                let columns = depthData.cameraCalibrationData!.intrinsicMatrix.columns
+                let intri_string:String = String(describing:columns.0[0]) + " 0.0000000 " + String(describing:columns.2[0]) + "\n"
+                                        + "0.0000000 " + String(describing:columns.1[1]) + " " + String(describing:columns.2[1]) + "\n"
+                                        + "0.0000000 0.0000000 1.0000000"
+
+//                print(intri_string)
+                let intri_path = URL(fileURLWithPath: fileDir+"camera_intrinsic.txt")
+                do{
+                    try intri_string.write(to: intri_path, atomically: false, encoding: .utf8)
+                }catch{
+                    print("Error: save intrinsic failed!!!")
+                }
             }
             
             let index = self.curSavedDepthIndex
