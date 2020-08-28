@@ -1381,7 +1381,6 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
         }
         
         if saveDepthToFile {
-            // 楚门
             printDepth(depthData: depthData)
             curSavedDepthIndex += 1 // 更新连拍数量
             
@@ -1391,6 +1390,7 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
                 dateformatter.dateFormat = "MM-dd-HH-mm-ss-SSS"
                 self.saveDir=dateformatter.string(from: Date())
                 self.fileDir = NSHomeDirectory() + "/Documents/" + self.saveDir + "/"
+                
                 // 创建文件夹 https://blog.csdn.net/a136447572/article/details/78983374
                 let  fileManager = FileManager.default
                 do{  // 创建文件夹   1，路径 2 是否补全中间的路劲 3 属性
@@ -1398,13 +1398,15 @@ class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVC
                 } catch{
                     print("Error: creat diraction false!!!")
                 }
-                //print("intrinsics \(depthData.cameraCalibrationData?.intrinsicMatrix)")
-                let columns = depthData.cameraCalibrationData!.intrinsicMatrix.columns
-                let intri_string:String = String(describing:columns.0[0]) + " 0.0000000 " + String(describing:columns.2[0]) + "\n"
-                                        + "0.0000000 " + String(describing:columns.1[1]) + " " + String(describing:columns.2[1]) + "\n"
-                                        + "0.0000000 0.0000000 1.0000000"
-
-//                print(intri_string)
+                
+                // 保存相机参数。可以自己选择
+                let intri_string:String = """
+                                        extrinsicMatrix\n\(depthData.cameraCalibrationData!.extrinsicMatrix)\n
+                                        intrinsicMatrix\n\(depthData.cameraCalibrationData!.intrinsicMatrix)\n
+                                        intrinsicMatrixReferenceDimensions\n\(depthData.cameraCalibrationData!.intrinsicMatrixReferenceDimensions)\n
+                                        pixelSize\n\(depthData.cameraCalibrationData!.pixelSize)\n
+                                        lensDistortionCenter\n\(depthData.cameraCalibrationData!.lensDistortionCenter)\n
+                                        """
                 let intri_path = URL(fileURLWithPath: fileDir+"camera_intrinsic.txt")
                 do{
                     try intri_string.write(to: intri_path, atomically: false, encoding: .utf8)
